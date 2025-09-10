@@ -54,12 +54,24 @@ def build_handler(uow_factory, jwt_secret: str, clock=None):
         def _error(self, msg: str = "Internal Server Error"):
             self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": msg})
 
+        def _forbidden(self, msg: str = "Forbidden"):
+            self._json(HTTPStatus.FORBIDDEN, {"error": msg})
+
         def _parse_auth(self) -> Dict[str, Any]:
             header = self.headers.get("Authorization")
             if not header or not header.startswith("Bearer "):
                 raise ValueError("missing bearer token")
             token = header.split(" ", 1)[1].strip()
             return jwt_verify(token, jwt_secret)
+
+        def _authorize_user(self, uid: int) -> bool:
+            try:
+                sub = self.claims.get("sub")
+                if sub is None:
+                    return False
+                return int(sub) == int(uid)
+            except Exception:  # noqa: BLE001
+                return False
 
         def _route(self, method: str, path: str):
             for m, regex, name in self._routes:
@@ -89,7 +101,11 @@ def build_handler(uow_factory, jwt_secret: str, clock=None):
                         self._unauthorized(str(e))
                         return
                 if name == "get_status":
-                    self._handle_get_status(int(params["uid"]))
+                    uid = int(params["uid"])
+                    if not self._authorize_user(uid):
+                        self._forbidden("cannot access another user's status")
+                        return
+                    self._handle_get_status(uid)
                 else:
                     self._not_found()
             except Exception:  # noqa: BLE001
@@ -115,6 +131,9 @@ def build_handler(uow_factory, jwt_secret: str, clock=None):
                     self._unauthorized(str(e))
                     return
                 uid = int(params.get("uid"))
+                if not self._authorize_user(uid):
+                    self._forbidden("cannot modify another user's plan")
+                    return
                 if name == "upgrade":
                     self._handle_upgrade(uid)
                 elif name == "downgrade":

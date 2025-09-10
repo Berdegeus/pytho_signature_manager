@@ -130,6 +130,89 @@ Client -> requests protegidas com Authorization: Bearer <token>
 Server: verifica assinatura e exp -> autoriza -> executa caso de uso
 ```
 
+## Referência de Rotas (API)
+
+Base URL: `http://<host>:<PORT>` (default `http://localhost:8080`). Todas as respostas são JSON.
+
+### POST /login
+- Autenticação: pública (sem token).
+- Corpo: `{"email": "<email>", "password": "<senha>"}`
+- Sucesso 200: `{ "token": "<JWT>" }` (HS256, `exp` padrão 3600s).
+- Erros:
+  - 422 Unprocessable Entity: JSON inválido ou campos ausentes.
+  - 401 Unauthorized: credenciais inválidas.
+  - 500 Internal Server Error: erro inesperado (sem stack trace).
+
+### GET /user/{id}/status
+- Autenticação: `Authorization: Bearer <token>` (obrigatório).
+- Autorização: somente o próprio usuário (`sub` do JWT deve ser igual a `{id}`).
+- Ação: calcula status efetivo (expira trial após 30 dias) e persiste mudança se houver.
+- Sucesso 200: `{ "user_id": <id>, "plan": "basic|trial|premium", "status": "active|suspended|expired" }`.
+- Erros:
+  - 401 Unauthorized: token ausente, inválido ou expirado.
+  - 403 Forbidden: tentar acessar outro `{id}`.
+  - 404 Not Found: usuário não encontrado.
+  - 500 Internal Server Error: erro inesperado.
+
+### POST /user/{id}/upgrade
+- Autenticação: `Bearer`.
+- Autorização: somente o próprio usuário (`sub == {id}`).
+- Ação: `basic|trial → premium` e `status=active`.
+- Corpo: vazio.
+- Sucesso 200: `{ "user_id": <id>, "plan": "premium", "status": "active" }`.
+- Erros:
+  - 401 Unauthorized: token ausente/inválido/expirado.
+  - 403 Forbidden: outro `{id}`.
+  - 404 Not Found: usuário inexistente.
+  - 422 Unprocessable Entity: plano atual não permite upgrade (já é premium).
+  - 500 Internal Server Error.
+
+### POST /user/{id}/downgrade
+- Autenticação: `Bearer`.
+- Autorização: somente o próprio usuário (`sub == {id}`).
+- Ação: `premium → basic` e `status=active`.
+- Corpo: vazio.
+- Sucesso 200: `{ "user_id": <id>, "plan": "basic", "status": "active" }`.
+- Erros:
+  - 401 Unauthorized; 403 Forbidden; 404 Not Found.
+  - 422 Unprocessable Entity: não está em premium.
+  - 500 Internal Server Error.
+
+### POST /user/{id}/suspend
+- Autenticação: `Bearer`.
+- Autorização: somente o próprio usuário (`sub == {id}`).
+- Ação: suspende somente se `plan=premium`.
+- Corpo: vazio.
+- Sucesso 200: `{ "user_id": <id>, "plan": "premium", "status": "suspended" }`.
+- Erros:
+  - 401 Unauthorized; 403 Forbidden; 404 Not Found.
+  - 422 Unprocessable Entity: não está em premium.
+  - 500 Internal Server Error.
+
+### POST /user/{id}/reactivate
+- Autenticação: `Bearer`.
+- Autorização: somente o próprio usuário (`sub == {id}`).
+- Ação: reativa somente se `plan=premium` e `status=suspended`.
+- Corpo: vazio.
+- Sucesso 200: `{ "user_id": <id>, "plan": "premium", "status": "active" }`.
+- Erros:
+  - 401 Unauthorized; 403 Forbidden; 404 Not Found.
+  - 422 Unprocessable Entity: não está suspenso/premium.
+  - 500 Internal Server Error.
+
+### Autenticação e JWT
+- Header: `Authorization: Bearer <token>`.
+- Assinatura: HS256; payload inclui `sub` (id do usuário), `email`, `plan`, `iat`, `exp`.
+- Expiração padrão: 3600s (1h).
+
+### Códigos de erro (resumo)
+- 200 OK: operação bem-sucedida.
+- 401 Unauthorized: token ausente/inválido/expirado (ou login inválido).
+- 403 Forbidden: usuário tentando acessar/modificar outro `{id}`.
+- 404 Not Found: recurso inexistente (ex.: usuário).
+- 422 Unprocessable Entity: JSON inválido/campos obrigatórios ausentes ou regra de negócio violada.
+- 500 Internal Server Error: erro inesperado; mensagem genérica (sem stack trace).
+
 ## AWS RDS (MySQL) — Passo a passo
 
 1) Criar instância RDS MySQL
