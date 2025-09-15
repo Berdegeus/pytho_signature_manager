@@ -1,0 +1,83 @@
+services:
+  app:
+    build: .
+    environment:
+      - DB_KIND=sqlite
+      - SQLITE_PATH=/app/data/capitalia.db
+      - JWT_SECRET=your-jwt-secret-here
+      - PORT=8080
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/login').read()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - app-network
+
+  router:
+    build:
+      context: ./router
+      dockerfile: Dockerfile
+    ports:
+      - "80:80"
+    environment:
+      - BACKEND_HOST=app
+      - BACKEND_PORT=8080
+      - ROUTER_PORT=80
+    depends_on:
+      - app
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:80/login').read()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - app-network
+
+  # Configuração opcional para MySQL (descomente se necessário)
+  # mysql:
+  #   image: mysql:8.0
+  #   environment:
+  #     MYSQL_ROOT_PASSWORD: rootpassword
+  #     MYSQL_DATABASE: capitalia
+  #     MYSQL_USER: capitalia_user
+  #     MYSQL_PASSWORD: changeme
+  #   ports:
+  #     - "3306:3306"
+  #   volumes:
+  #     - mysql_data:/var/lib/mysql
+  #   restart: unless-stopped
+  #   networks:
+  #     - app-network
+  
+  # app-mysql:
+  #   build: .
+  #   ports:
+  #     - "8081:8080"
+  #   environment:
+  #     - DB_KIND=mysql
+  #     - MYSQL_HOST=mysql
+  #     - MYSQL_USER=capitalia_user
+  #     - MYSQL_PASSWORD=changeme
+  #     - MYSQL_DB=capitalia
+  #     - MYSQL_PORT=3306
+  #     - JWT_SECRET=your-jwt-secret-here
+  #     - PORT=8080
+  #   depends_on:
+  #     - mysql
+  #   restart: unless-stopped
+  #   networks:
+  #     - app-network
+
+networks:
+  app-network:
+    driver: bridge
+
+# volumes:
+#   mysql_data:
