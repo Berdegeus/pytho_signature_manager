@@ -1,0 +1,53 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      - DB_KIND=sqlite
+      - SQLITE_PATH=/app/data/capitalia.db
+      - JWT_SECRET=your-jwt-secret-here
+      - PORT=8080
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health').read()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Configuração opcional para MySQL (descomente se necessário)
+  # mysql:
+  #   image: mysql:8.0
+  #   environment:
+  #     MYSQL_ROOT_PASSWORD: rootpassword
+  #     MYSQL_DATABASE: capitalia
+  #     MYSQL_USER: capitalia_user
+  #     MYSQL_PASSWORD: changeme
+  #   ports:
+  #     - "3306:3306"
+  #   volumes:
+  #     - mysql_data:/var/lib/mysql
+  #   restart: unless-stopped
+  
+  # app-mysql:
+  #   build: .
+  #   ports:
+  #     - "8081:8080"
+  #   environment:
+  #     - DB_KIND=mysql
+  #     - MYSQL_HOST=mysql
+  #     - MYSQL_USER=capitalia_user
+  #     - MYSQL_PASSWORD=changeme
+  #     - MYSQL_DB=capitalia
+  #     - MYSQL_PORT=3306
+  #     - JWT_SECRET=your-jwt-secret-here
+  #     - PORT=8080
+  #   depends_on:
+  #     - mysql
+  #   restart: unless-stopped
+
+# volumes:
+#   mysql_data:
