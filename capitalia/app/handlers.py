@@ -57,6 +57,16 @@ def build_handler(uow_factory, jwt_secret: str, clock=None):
         def _forbidden(self, msg: str = "Forbidden"):
             self._json(HTTPStatus.FORBIDDEN, {"error": msg})
 
+        def _method_not_allowed(self, allowed: set[str]):
+            self._resp_code = HTTPStatus.METHOD_NOT_ALLOWED
+            body = json.dumps({"error": "Method Not Allowed"}).encode()
+            self.send_response(HTTPStatus.METHOD_NOT_ALLOWED)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Allow", ", ".join(sorted(allowed)))
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
         def _parse_auth(self) -> Dict[str, Any]:
             header = self.headers.get("Authorization")
             if not header or not header.startswith("Bearer "):
@@ -81,6 +91,13 @@ def build_handler(uow_factory, jwt_secret: str, clock=None):
                         return name, match.groupdict()
             return None, {}
 
+        def _allowed_methods_for_path(self, path: str) -> set[str]:
+            allowed = set()
+            for m, regex, _ in self._routes:
+                if regex.match(path):
+                    allowed.add(m)
+            return allowed
+
         def _log(self, start: float, code: int):
             dur = (time.time() - start) * 1000
             print(f"{self.command} {self.path} -> {code} {dur:.1f}ms")
@@ -92,7 +109,11 @@ def build_handler(uow_factory, jwt_secret: str, clock=None):
                 route_path = urlsplit(self.path).path
                 name, params = self._route("GET", route_path)
                 if name is None:
-                    self._not_found()
+                    allowed = self._allowed_methods_for_path(route_path)
+                    if allowed:
+                        self._method_not_allowed(allowed)
+                    else:
+                        self._not_found()
                     return
                 if name != "login":
                     try:
@@ -120,7 +141,11 @@ def build_handler(uow_factory, jwt_secret: str, clock=None):
                 route_path = urlsplit(self.path).path
                 name, params = self._route("POST", route_path)
                 if name is None:
-                    self._not_found()
+                    allowed = self._allowed_methods_for_path(route_path)
+                    if allowed:
+                        self._method_not_allowed(allowed)
+                    else:
+                        self._not_found()
                     return
                 if name == "login":
                     self._handle_login()

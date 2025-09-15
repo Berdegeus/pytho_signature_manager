@@ -210,6 +210,7 @@ Base URL: `http://<host>:<PORT>` (default `http://localhost:8080`). Todas as res
 - 401 Unauthorized: token ausente/inválido/expirado (ou login inválido).
 - 403 Forbidden: usuário tentando acessar/modificar outro `{id}`.
 - 404 Not Found: recurso inexistente (ex.: usuário).
+- 405 Method Not Allowed: método HTTP incorreto para a rota (ex.: usar GET onde é POST).
 - 422 Unprocessable Entity: JSON inválido/campos obrigatórios ausentes ou regra de negócio violada.
 - 500 Internal Server Error: erro inesperado; mensagem genérica (sem stack trace).
 
