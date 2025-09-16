@@ -43,4 +43,3 @@ class SqlUnitOfWork(UnitOfWork):
 
     def rollback(self) -> None:
         self.conn.rollback()
-

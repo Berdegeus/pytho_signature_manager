@@ -22,4 +22,3 @@ class UserRepository(ABC):
     @abstractmethod
     def save(self, user: User) -> None:
         ...
-
