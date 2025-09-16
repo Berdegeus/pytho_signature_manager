@@ -6,7 +6,7 @@ from urllib.parse import urlsplit
 import time
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler
-from typing import Callable, Dict, Any
+from typing import Dict, Any
 
 from ..adapters.jwt_auth import sign as jwt_sign, verify as jwt_verify
 from ..domain.errors import NotFoundError, ValidationError
@@ -19,14 +19,19 @@ def build_handler(uow_factory, jwt_secret: str, clock=None):
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "CapitaliaHTTP/1.0"
-        _routes = [
-            ("POST", re.compile(r"^/login$"), "login"),
-            ("GET", re.compile(r"^/user/(?P<uid>\d+)/status$"), "get_status"),
-            ("POST", re.compile(r"^/user/(?P<uid>\d+)/upgrade$"), "upgrade"),
-            ("POST", re.compile(r"^/user/(?P<uid>\d+)/downgrade$"), "downgrade"),
-            ("POST", re.compile(r"^/user/(?P<uid>\d+)/suspend$"), "suspend"),
-            ("POST", re.compile(r"^/user/(?P<uid>\d+)/reactivate$"), "reactivate"),
-        ]
+        _routes = {
+            "GET": [
+                (re.compile(r"^/health$"), "health"),
+                (re.compile(r"^/user/(?P<uid>\d+)/status$"), "get_status"),
+            ],
+            "POST": [
+                (re.compile(r"^/login$"), "login"),
+                (re.compile(r"^/user/(?P<uid>\d+)/upgrade$"), "upgrade"),
+                (re.compile(r"^/user/(?P<uid>\d+)/downgrade$"), "downgrade"),
+                (re.compile(r"^/user/(?P<uid>\d+)/suspend$"), "suspend"),
+                (re.compile(r"^/user/(?P<uid>\d+)/reactivate$"), "reactivate"),
+            ],
+        }
 
         def _json(self, code: int, data: Dict[str, Any]):
             self._resp_code = code
@@ -34,6 +39,7 @@ def build_handler(uow_factory, jwt_secret: str, clock=None):
             self.send_response(code)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
+            self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(body)
 
@@ -57,6 +63,9 @@ def build_handler(uow_factory, jwt_secret: str, clock=None):
         def _forbidden(self, msg: str = "Forbidden"):
             self._json(HTTPStatus.FORBIDDEN, {"error": msg})
 
+        def _bad_request(self, msg: str = "Bad Request"):
+            self._json(HTTPStatus.BAD_REQUEST, {"error": msg})
+
         def _method_not_allowed(self, allowed: set[str]):
             self._resp_code = HTTPStatus.METHOD_NOT_ALLOWED
             body = json.dumps({"error": "Method Not Allowed"}).encode()
@@ -64,6 +73,7 @@ def build_handler(uow_factory, jwt_secret: str, clock=None):
             self.send_header("Content-Type", "application/json")
             self.send_header("Allow", ", ".join(sorted(allowed)))
             self.send_header("Content-Length", str(len(body)))
+            self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(body)
 
@@ -84,23 +94,45 @@ def build_handler(uow_factory, jwt_secret: str, clock=None):
                 return False
 
         def _route(self, method: str, path: str):
-            for m, regex, name in self._routes:
-                if m == method:
-                    match = regex.match(path)
-                    if match:
-                        return name, match.groupdict()
+            for regex, name in self._routes.get(method, []):
+                match = regex.match(path)
+                if match:
+                    return name, match.groupdict()
             return None, {}
 
         def _allowed_methods_for_path(self, path: str) -> set[str]:
             allowed = set()
-            for m, regex, _ in self._routes:
-                if regex.match(path):
-                    allowed.add(m)
+            for m, routes in self._routes.items():
+                for regex, _ in routes:
+                    if regex.match(path):
+                        allowed.add(m)
+                        break
             return allowed
 
         def _log(self, start: float, code: int):
-            dur = (time.time() - start) * 1000
-            print(f"{self.command} {self.path} -> {code} {dur:.1f}ms")
+            dur_ms = round((time.time() - start) * 1000, 1)
+            entry = {
+                "ts": int(time.time() * 1000),
+                "method": self.command,
+                "path": self.path,
+                "status": int(code),
+                "ms": dur_ms,
+                "remote": self.client_address[0] if self.client_address else None,
+            }
+            try:
+                print(json.dumps(entry, separators=(",", ":")))
+            except Exception:  # noqa: BLE001
+                pass
+
+        def _send_headers(self, code: int, allowed: set[str] | None = None):
+            self._resp_code = code
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", "0")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            if allowed:
+                self.send_header("Allow", ", ".join(sorted(allowed)))
+            self.end_headers()
 
         def do_GET(self):  # noqa: N802
             start = time.time()
@@ -115,13 +147,15 @@ def build_handler(uow_factory, jwt_secret: str, clock=None):
                     else:
                         self._not_found()
                     return
-                if name != "login":
+                if name not in {"login", "health"}:
                     try:
                         self.claims = self._parse_auth()
                     except Exception as e:  # noqa: BLE001
                         self._unauthorized(str(e))
                         return
-                if name == "get_status":
+                if name == "health":
+                    self._json(HTTPStatus.OK, {"status": "ok"})
+                elif name == "get_status":
                     uid = int(params["uid"])
                     if not self._authorize_user(uid):
                         self._forbidden("cannot access another user's status")
@@ -133,6 +167,53 @@ def build_handler(uow_factory, jwt_secret: str, clock=None):
                 self._error()
             finally:
                 self._log(start, getattr(self, "_resp_code", 500))
+
+        def do_HEAD(self):  # noqa: N802
+            start = time.time()
+            self._resp_code = 500
+            try:
+                route_path = urlsplit(self.path).path
+                name, params = self._route("GET", route_path)
+                if name is None:
+                    allowed = self._allowed_methods_for_path(route_path)
+                    if allowed:
+                        self._send_headers(HTTPStatus.METHOD_NOT_ALLOWED, allowed)
+                    else:
+                        self._send_headers(HTTPStatus.NOT_FOUND)
+                    return
+                if name not in {"login", "health"}:
+                    try:
+                        self.claims = self._parse_auth()
+                    except Exception as e:  # noqa: BLE001
+                        self._send_headers(HTTPStatus.UNAUTHORIZED)
+                        return
+                if name in {"health", "get_status"}:
+                    self._send_headers(HTTPStatus.OK)
+                else:
+                    self._send_headers(HTTPStatus.NOT_FOUND)
+            except Exception:  # noqa: BLE001
+                self._send_headers(HTTPStatus.INTERNAL_SERVER_ERROR)
+            finally:
+                self._log(start, getattr(self, "_resp_code", 500))
+
+        def do_OPTIONS(self):  # noqa: N802
+            start = time.time()
+            self._resp_code = 204
+            try:
+                route_path = urlsplit(self.path).path
+                allowed = self._allowed_methods_for_path(route_path)
+                if not allowed:
+                    allowed = {"GET", "POST"}
+                allowed_with_options = set(allowed) | {"OPTIONS"}
+                self.send_response(HTTPStatus.NO_CONTENT)
+                self.send_header("Allow", ", ".join(sorted(allowed_with_options)))
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type")
+                self.send_header("Access-Control-Allow-Methods", ", ".join(sorted(allowed)))
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+            finally:
+                self._log(start, getattr(self, "_resp_code", 204))
 
         def do_POST(self):  # noqa: N802
             start = time.time()
@@ -148,6 +229,10 @@ def build_handler(uow_factory, jwt_secret: str, clock=None):
                         self._not_found()
                     return
                 if name == "login":
+                    ct = (self.headers.get("Content-Type") or "").lower()
+                    if "application/json" not in ct:
+                        self._bad_request("Content-Type must be application/json")
+                        return
                     self._handle_login()
                     return
                 try:

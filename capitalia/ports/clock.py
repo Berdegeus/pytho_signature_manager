@@ -15,4 +15,3 @@ class RealClock(Clock):
         from datetime import date as _date
 
         return _date.today()
-

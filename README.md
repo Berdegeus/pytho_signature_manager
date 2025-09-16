@@ -63,6 +63,9 @@ Este projeto implementa um microsserviço único para gestão de assinaturas (st
 - POST `/user/{id}/downgrade`
 - POST `/user/{id}/suspend`
 - POST `/user/{id}/reactivate`
+- GET `/health` → `{status:"ok"}`
+
+Suporte a CORS básico: `Access-Control-Allow-Origin: *` nas respostas. `OPTIONS` responde preflight com `Allow`, `Access-Control-Allow-Headers` e `Access-Control-Allow-Methods`.
 
 Erros: `401` (token ausente/inválido), `404`, `422` (payload/estado inválido), `500` (erro interno sem stack trace).
 
@@ -81,6 +84,9 @@ TOKEN="$(curl -s -X POST http://localhost:8080/login \
 
 # Status efetivo (aplica expiração do trial)
 curl -s http://localhost:8080/user/1/status -H "Authorization: Bearer $TOKEN"
+
+# Healthcheck
+curl -s http://localhost:8080/health
 
 # Upgrade
 curl -s -X POST http://localhost:8080/user/1/upgrade -H "Authorization: Bearer $TOKEN"
