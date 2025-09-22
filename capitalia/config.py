@@ -85,4 +85,3 @@ class Config:
                 return MySQLUserRepository(conn)
 
             return repo_factory
-

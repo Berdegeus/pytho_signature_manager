@@ -93,4 +93,3 @@ class MySQLUserRepository(UserRepository):
                     user.id,
                 ),
             )
-
