@@ -15,8 +15,8 @@ def main() -> None:
     def uow_factory():
         return SqlUnitOfWork(conn_factory, repo_factory)
 
-    Handler = build_handler(uow_factory, cfg.jwt_secret, RealClock())
-    run_server(Handler, cfg.port)
+    handler = build_handler(uow_factory, cfg.jwt_secret, RealClock())
+    run_server(handler, cfg.port)
 
 
 if __name__ == "__main__":
